@@ -17,6 +17,7 @@ class MenuSelectionScreen extends StatefulWidget {
 
 class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
   Member? _selectedMember;
+  String? _selectedMenuItemId; // 투표 완료 전까지 로컬에만 보관
   final List<MenuItem> _addedMenuItems = [];
   final Set<String> _deletedMenuItemIds = {};
   final Map<String, int> _priceOverrides = {};
@@ -38,6 +39,7 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
     } else {
       _selectedMember = members.last;
     }
+    _selectedMenuItemId = _selectedMember?.selectedMenuItemId;
   }
 
   bool _isSubmitting = false;
@@ -51,16 +53,15 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
   }
 
   bool get _canSubmit =>
-      _selectedMember?.selectedMenuItemId != null &&
-      !_deletedMenuItemIds.contains(_selectedMember?.selectedMenuItemId);
+      _selectedMenuItemId != null &&
+      !_deletedMenuItemIds.contains(_selectedMenuItemId);
 
   int _priceOf(MenuItem item) => _priceOverrides[item.id] ?? item.price;
 
   int _selectedPrice() {
-    if (_selectedMember?.selectedMenuItemId == null) return 0;
+    if (_selectedMenuItemId == null) return 0;
     try {
-      final item = _allMenuItems
-          .firstWhere((m) => m.id == _selectedMember!.selectedMenuItemId);
+      final item = _allMenuItems.firstWhere((m) => m.id == _selectedMenuItemId);
       return _priceOf(item);
     } catch (_) {
       return 0;
@@ -134,11 +135,7 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
   void _selectMenu(MenuItem item) {
     if (_selectedMember == null) return;
     setState(() {
-      if (_selectedMember!.selectedMenuItemId == item.id) {
-        _selectedMember!.selectedMenuItemId = null;
-      } else {
-        _selectedMember!.selectedMenuItemId = item.id;
-      }
+      _selectedMenuItemId = _selectedMenuItemId == item.id ? null : item.id;
     });
   }
 
@@ -361,6 +358,9 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
                                       m.selectedMenuItemId = null;
                                     }
                                   }
+                                  if (_selectedMenuItemId == item.id) {
+                                    _selectedMenuItemId = null;
+                                  }
                                 });
                                 setModalState(() {});
                               }
@@ -381,9 +381,12 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
   Future<void> _goToResult() async {
     if (_selectedMember == null) return;
 
+    // 투표 완료 시점에 로컬 선택을 멤버에 반영
+    _selectedMember!.selectedMenuItemId = _selectedMenuItemId;
+
     final restaurant = widget.session.selectedRestaurant;
     final menuItem = _allMenuItems.cast<MenuItem?>().firstWhere(
-      (m) => m?.id == _selectedMember!.selectedMenuItemId,
+      (m) => m?.id == _selectedMenuItemId,
       orElse: () => null,
     );
     final userId = _selectedMember!.serverId;
@@ -471,22 +474,23 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: session.members.map((member) {
+                      final isMe = member.serverId == widget.currentUserId;
                       final isSelected = _selectedMember?.id == member.id;
                       final hasPicked = member.selectedMenuItemId != null;
                       return GestureDetector(
-                        onTap: () => setState(() => _selectedMember = member),
+                        onTap: isMe ? () => setState(() => _selectedMember = member) : null,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? const Color(0xFFFF6B35)
-                                : Colors.white,
+                                : isMe ? Colors.white : Colors.grey[100],
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                               color: isSelected
                                   ? const Color(0xFFFF6B35)
-                                  : Colors.grey[300]!,
+                                  : isMe ? Colors.grey[300]! : Colors.grey[200]!,
                             ),
                           ),
                           child: Row(
@@ -495,7 +499,9 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
                               Text(
                                 member.name,
                                 style: TextStyle(
-                                  color: isSelected ? Colors.white : Colors.black87,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : isMe ? Colors.black87 : Colors.grey[400],
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -539,8 +545,7 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
                     )
                   else
                     ..._allMenuItems.map((item) {
-                      final isItemSelected =
-                          _selectedMember?.selectedMenuItemId == item.id;
+                      final isItemSelected = _selectedMenuItemId == item.id;
                       final isAdded = _addedMenuItems.contains(item);
                       return GestureDetector(
                         onTap: _selectedMember != null
@@ -705,7 +710,7 @@ class _MenuSelectionScreenState extends State<MenuSelectionScreen> {
                       ),
                       const Spacer(),
                       Text(
-                        _selectedMember?.selectedMenuItemId != null
+                        _selectedMenuItemId != null
                             ? '${formatPrice(_selectedPrice())}원'
                             : '-',
                         style: const TextStyle(

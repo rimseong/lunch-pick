@@ -24,6 +24,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final List<Session> _sessions = [];
   bool _isLoading = false;
+  bool _isNonParticipant = false;
 
   @override
   void initState() {
@@ -204,6 +205,72 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     if (mounted) setState(() => _sessions.remove(session));
+  }
+
+  void _markNonParticipant() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('미참여'),
+        content: const Text('오늘 점심에 참여하지 않으시겠어요?\n(도시락 등)'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(() => _isNonParticipant = true);
+    }
+  }
+
+  void _cancelNonParticipant() {
+    setState(() => _isNonParticipant = false);
+  }
+
+  void _cancelVote(Session session) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('투표 취소'),
+        content: const Text('투표를 취소하시겠어요?\n다시 처음부터 선택할 수 있어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('아니요'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('취소할게요', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final currentUser = widget.currentUser;
+    final member = session.members
+        .cast<Member?>()
+        .firstWhere((m) => m?.serverId == currentUser.id, orElse: () => null);
+
+    if (member?.selectionServerId != null) {
+      try {
+        await ApiService.deleteSelection(member!.selectionServerId!);
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() {
+        session.members.removeWhere((m) => m.serverId == currentUser.id);
+        if (session.members.isEmpty) _sessions.remove(session);
+      });
+    }
   }
 
   void _createSession() async {
@@ -436,7 +503,21 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        // 새로 추가했지만 메뉴 미선택 상태로 돌아오면 멤버 제거
+        if (!alreadyMember) {
+          final member = session.members.cast<Member?>().firstWhere(
+            (m) => m?.serverId == currentUser.id,
+            orElse: () => null,
+          );
+          if (member != null && member.selectedMenuItemId == null) {
+            session.members.remove(member);
+            if (session.members.isEmpty) _sessions.remove(session);
+          }
+        }
+      });
+    }
   }
 
   Widget _buildSummaryBar() {
@@ -661,36 +742,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 : RefreshIndicator(
                     color: const Color(0xFFFF6B35),
                     onRefresh: _refresh,
-                    child: sortedSessions.isEmpty
-                        ? ListView(
-                            children: [
-                              SizedBox(
-                                height: MediaQuery.of(context).size.height * 0.4,
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.restaurant_menu, size: 80, color: Colors.grey[300]),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      '아직 아무도 등록하지 않았어요',
-                                      style: TextStyle(fontSize: 16, color: Colors.grey[500]),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      '+ 버튼을 눌러 점심 식당 및 메뉴를 선정해 보세요!',
-                                      style: TextStyle(fontSize: 13, color: Colors.grey[400]),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          )
-                        : ListView.builder(
+                    child: ListView(
                             padding: const EdgeInsets.all(16),
-                            itemCount: sortedSessions.length,
-                            itemBuilder: (context, index) {
-                              final session = sortedSessions[index];
-                              return _SessionCard(
+                            children: [
+                              if (sortedSessions.isEmpty && !_isNonParticipant)
+                                SizedBox(
+                                  height: MediaQuery.of(context).size.height * 0.4,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.restaurant_menu, size: 80, color: Colors.grey[300]),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        '아직 아무도 등록하지 않았어요',
+                                        style: TextStyle(fontSize: 16, color: Colors.grey[500]),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        '+ 버튼을 눌러 점심 식당 및 메뉴를 선정해 보세요!',
+                                        style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ...sortedSessions.map((session) => _SessionCard(
                                 session: session,
                                 statusLabel: _statusLabel(session.status),
                                 statusColor: _statusColor(session.status),
@@ -701,20 +776,97 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onReVote: () => _reVote(session),
                                 onReVoteRestaurant: () => _reVoteRestaurant(session),
                                 onDelete: () => _deleteSession(session),
-                              );
-                            },
+                                onCancelVote: () => _cancelVote(session),
+                              )),
+                              if (_isNonParticipant)
+                                _NonParticipantCard(
+                                  userName: widget.currentUser.name,
+                                  onCancel: _cancelNonParticipant,
+                                ),
+                            ],
                           ),
                   ),
           ),
         ],
       ),
-      floatingActionButton: currentUserSessionId == null
-          ? FloatingActionButton(
-              onPressed: _createSession,
-              backgroundColor: const Color(0xFFFF6B35),
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+      floatingActionButton: _isNonParticipant
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton.extended(
+                  heroTag: 'nonParticipant',
+                  onPressed: _markNonParticipant,
+                  backgroundColor: Colors.grey[600],
+                  icon: const Icon(Icons.no_meals_outlined, color: Colors.white, size: 18),
+                  label: const Text('미참여', style: TextStyle(color: Colors.white, fontSize: 13)),
+                ),
+                if (currentUserSessionId == null) ...[
+                  const SizedBox(height: 12),
+                  FloatingActionButton(
+                    heroTag: 'createSession',
+                    onPressed: _createSession,
+                    backgroundColor: const Color(0xFFFF6B35),
+                    child: const Icon(Icons.add, color: Colors.white),
+                  ),
+                ],
+              ],
+            ),
+    );
+  }
+}
+
+class _NonParticipantCard extends StatelessWidget {
+  final String userName;
+  final VoidCallback onCancel;
+
+  const _NonParticipantCard({required this.userName, required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.no_meals_outlined, color: Colors.grey[500], size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(userName,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text('미참여 (도시락 등)',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+                ],
+              ),
+            ),
+            OutlinedButton(
+              onPressed: onCancel,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.grey[600],
+                side: BorderSide(color: Colors.grey[400]!),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('취소', style: TextStyle(fontSize: 13)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -730,6 +882,7 @@ class _SessionCard extends StatelessWidget {
   final VoidCallback onReVote;
   final VoidCallback onReVoteRestaurant;
   final VoidCallback onDelete;
+  final VoidCallback onCancelVote;
 
   const _SessionCard({
     required this.session,
@@ -742,6 +895,7 @@ class _SessionCard extends StatelessWidget {
     required this.onReVote,
     required this.onReVoteRestaurant,
     required this.onDelete,
+    required this.onCancelVote,
   });
 
   @override
@@ -920,6 +1074,26 @@ class _SessionCard extends StatelessWidget {
                       ),
                     ],
                   ],
+                ),
+              ],
+              if (canReVote) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: onCancelVote,
+                    icon: const Icon(Icons.cancel_outlined, size: 16),
+                    label: const Text('투표 취소',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red[400],
+                      side: BorderSide(color: Colors.red[300]!),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ],
