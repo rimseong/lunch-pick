@@ -9,51 +9,46 @@ class StatisticsScreen extends StatefulWidget {
   State<StatisticsScreen> createState() => _StatisticsScreenState();
 }
 
-class _StatisticsScreenState extends State<StatisticsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _StatisticsScreenState extends State<StatisticsScreen> {
   int _year = DateTime.now().year;
   int _month = DateTime.now().month;
   bool _isLoading = false;
+  String? _selectedDate;
 
   List<Map<String, dynamic>> _selections = [];
   Map<int, String> _userNames = {};
+  Map<int, String> _restaurantNames = {};
 
-  static const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+  static const _weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
+  static const _weekdaysFull = ['월', '화', '수', '목', '금', '토', '일'];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _loadData();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadData() async {
-    if (mounted) setState(() => _isLoading = true);
+    if (mounted) setState(() { _isLoading = true; _selectedDate = null; });
     try {
       final results = await Future.wait([
         ApiService.listSelectionsByMonth(_year, _month),
         ApiService.listAllUsers(),
+        ApiService.listRestaurants(),
       ]);
 
-      final selections = results[0];
-      final users = results[1];
-
       final Map<int, String> names = {
-        for (final u in users)
-          u['id'] as int: u['name'] as String,
+        for (final u in results[1]) u['id'] as int: u['name'] as String,
+      };
+      final Map<int, String> restaurantNames = {
+        for (final r in results[2]) r['id'] as int: r['name'] as String,
       };
 
       if (mounted) {
         setState(() {
-          _selections = selections;
+          _selections = results[0];
           _userNames = names;
+          _restaurantNames = restaurantNames;
           _isLoading = false;
         });
       }
@@ -64,12 +59,7 @@ class _StatisticsScreenState extends State<StatisticsScreen>
 
   void _prevMonth() {
     setState(() {
-      if (_month == 1) {
-        _month = 12;
-        _year--;
-      } else {
-        _month--;
-      }
+      _month == 1 ? (_month = 12, _year--) : _month--;
     });
     _loadData();
   }
@@ -78,12 +68,7 @@ class _StatisticsScreenState extends State<StatisticsScreen>
     final now = DateTime.now();
     if (_year == now.year && _month == now.month) return;
     setState(() {
-      if (_month == 12) {
-        _month = 1;
-        _year++;
-      } else {
-        _month++;
-      }
+      _month == 12 ? (_month = 1, _year++) : _month++;
     });
     _loadData();
   }
@@ -93,40 +78,25 @@ class _StatisticsScreenState extends State<StatisticsScreen>
     return _year == now.year && _month == now.month;
   }
 
-  // 일자별 그룹핑 (날짜 오름차순)
-  List<MapEntry<String, List<Map<String, dynamic>>>> get _byDate {
+  Map<String, List<Map<String, dynamic>>> get _byDateMap {
     final Map<String, List<Map<String, dynamic>>> map = {};
     for (final sel in _selections) {
-      final date = sel['date'] as String;
-      map.putIfAbsent(date, () => []).add(sel);
+      map.putIfAbsent(sel['date'] as String, () => []).add(sel);
     }
-    return map.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    return map;
   }
 
-  // 사람별 그룹핑 (총금액 내림차순)
-  List<MapEntry<int, List<Map<String, dynamic>>>> get _byUser {
-    final Map<int, List<Map<String, dynamic>>> map = {};
-    for (final sel in _selections) {
-      final userId = sel['user_id'] as int;
-      map.putIfAbsent(userId, () => []).add(sel);
-    }
-    return map.entries.toList()
-      ..sort((a, b) {
-        final aTotal = a.value.fold(0, (s, e) => s + (e['price'] as int));
-        final bTotal = b.value.fold(0, (s, e) => s + (e['price'] as int));
-        return bTotal.compareTo(aTotal);
-      });
+  String _dateKey(int day) {
+    final m = _month.toString().padLeft(2, '0');
+    final d = day.toString().padLeft(2, '0');
+    return '$_year-$m-$d';
   }
 
-  int get _totalAmount =>
-      _selections.fold(0, (s, e) => s + (e['price'] as int));
-
-  String _formatDate(String dateStr) {
+  String _formatDateLabel(String dateStr) {
     final parts = dateStr.split('-');
     if (parts.length != 3) return dateStr;
     final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
-    final weekday = _weekdays[dt.weekday - 1];
-    return '${parts[1]}/${parts[2]} ($weekday)';
+    return '${parts[1]}/${parts[2]} (${_weekdaysFull[dt.weekday - 1]})';
   }
 
   @override
@@ -142,38 +112,16 @@ class _StatisticsScreenState extends State<StatisticsScreen>
         ),
         title: const Text(
           '이용 내역',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1A1A1A),
-          ),
-        ),
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: const Color(0xFFFF6B35),
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: const Color(0xFFFF6B35),
-          tabs: const [
-            Tab(text: '일자별'),
-            Tab(text: '사람별'),
-          ],
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A)),
         ),
       ),
       body: Column(
         children: [
           _buildMonthPicker(),
-          if (!_isLoading && _selections.isNotEmpty) _buildTotalBar(),
           Expanded(
             child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF6B35)))
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildDateTab(),
-                      _buildUserTab(),
-                    ],
-                  ),
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B35)))
+                : _buildCalendarTab(),
           ),
         ],
       ),
@@ -211,199 +159,240 @@ class _StatisticsScreenState extends State<StatisticsScreen>
     );
   }
 
-  Widget _buildTotalBar() {
-    return Container(
-      color: const Color(0xFFFF6B35),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            '$_month월 총 이용금액',
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-          ),
-          Text(
-            '${formatPrice(_totalAmount)}원',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+  Widget _buildCalendarTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildCalendarGrid(),
+        if (_selectedDate != null) ...[
+          const SizedBox(height: 12),
+          _buildDayDetail(_selectedDate!),
         ],
+      ],
+    );
+  }
+
+  Widget _buildCalendarGrid() {
+    final byDate = _byDateMap;
+    final firstDay = DateTime(_year, _month, 1);
+    final daysInMonth = DateTime(_year, _month + 1, 0).day;
+    final startOffset = firstDay.weekday - 1;
+    final today = DateTime.now();
+    final isThisMonth = today.year == _year && today.month == _month;
+    const cellHeight = 66.0;
+    final totalRows = ((startOffset + daysInMonth) / 7).ceil();
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: _weekdayLabels.map((d) {
+                final isSat = d == '토';
+                final isSun = d == '일';
+                return Expanded(
+                  child: Center(
+                    child: Text(
+                      d,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isSun ? Colors.red[300] : isSat ? Colors.blue[300] : Colors.grey[600],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            ...List.generate(totalRows, (row) {
+              return Row(
+                children: List.generate(7, (col) {
+                  final day = row * 7 + col - startOffset + 1;
+                  if (day < 1 || day > daysInMonth) {
+                    return const Expanded(child: SizedBox(height: cellHeight));
+                  }
+
+                  final dateKey = _dateKey(day);
+                  final dayData = byDate[dateKey];
+                  final hasData = dayData != null && dayData.isNotEmpty;
+                  final isSelected = _selectedDate == dateKey;
+                  final isToday = isThisMonth && today.day == day;
+                  final isSun = col == 6;
+                  final isSat = col == 5;
+
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: hasData
+                          ? () => setState(() {
+                                _selectedDate = isSelected ? null : dateKey;
+                              })
+                          : null,
+                      child: SizedBox(
+                        height: cellHeight,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFFFF6B35)
+                                    : isToday
+                                        ? const Color(0xFFFFEDE5)
+                                        : Colors.transparent,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$day',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: hasData || isToday
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: isSelected
+                                        ? Colors.white
+                                        : isSun
+                                            ? Colors.red[300]
+                                            : isSat
+                                                ? Colors.blue[300]
+                                                : hasData
+                                                    ? const Color(0xFF1A1A1A)
+                                                    : Colors.grey[400],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (hasData) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                formatPrice(dayData.fold(0, (s, e) => s + (e['price'] as int))),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isSelected
+                                      ? const Color(0xFFFF6B35)
+                                      : Colors.grey[600],
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                '${dayData.length}명',
+                                style: TextStyle(fontSize: 9, color: Colors.grey[400]),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildDateTab() {
-    final byDate = _byDate;
-    if (byDate.isEmpty) return _buildEmpty();
+  Widget _buildDayDetail(String dateKey) {
+    final dayData = _byDateMap[dateKey] ?? [];
+    final label = _formatDateLabel(dateKey);
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: byDate.length,
-      itemBuilder: (context, index) {
-        final entry = byDate[index];
-        final dateLabel = _formatDate(entry.key);
-        final totalForDay = entry.value.fold(0, (s, e) => s + (e['price'] as int));
-        final memberCount = entry.value.length;
+    final Map<int, List<Map<String, dynamic>>> byRestaurant = {};
+    for (final sel in dayData) {
+      byRestaurant.putIfAbsent(sel['restaurant_id'] as int, () => []).add(sel);
+    }
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 10),
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: ExpansionTile(
-            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: Row(
-              children: [
-                Text(
-                  dateLabel,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEDE5),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '$memberCount명',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B35)),
-                  ),
-                ),
-              ],
-            ),
-            trailing: Text(
-              '${formatPrice(totalForDay)}원',
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B35),
-              ),
-            ),
-            children: entry.value.map((sel) {
-              final userId = sel['user_id'] as int;
-              final name = _userNames[userId] ?? '사용자$userId';
-              final price = sel['price'] as int;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            ...byRestaurant.entries.map((entry) {
+              final restaurantName = _restaurantNames[entry.key] ?? '식당${entry.key}';
+              final members = entry.value;
+
+              final treasurerSel = members.cast<Map<String, dynamic>?>().firstWhere(
+                (m) => (m?['memo'] as String?) == 'treasurer',
+                orElse: () => null,
+              );
+              final treasurerName = treasurerSel != null
+                  ? (_userNames[treasurerSel['user_id'] as int] ?? '?')
+                  : null;
+
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.person_outline, size: 14, color: Colors.grey),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(name,
-                          style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    Row(
+                      children: [
+                        const Icon(Icons.restaurant, size: 14, color: Color(0xFFFF6B35)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            restaurantName,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFFF6B35),
+                            ),
+                          ),
+                        ),
+                        if (treasurerName != null) ...[
+                          const Icon(Icons.account_balance_wallet_outlined, size: 13, color: Color(0xFFFF6B35)),
+                          const SizedBox(width: 3),
+                          Text(
+                            '총무: $treasurerName',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFFFF6B35),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    Text(
-                      '${formatPrice(price)}원',
-                      style: const TextStyle(fontSize: 13, color: Colors.black54),
-                    ),
+                    const SizedBox(height: 6),
+                    ...members.map((sel) {
+                      final name = _userNames[sel['user_id'] as int] ?? '사용자${sel['user_id']}';
+                      final price = sel['price'] as int;
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 20, bottom: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person_outline, size: 13, color: Colors.grey),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(name,
+                                  style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                            ),
+                            Text('${formatPrice(price)}원',
+                                style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                          ],
+                        ),
+                      );
+                    }),
+                    const Divider(height: 16),
                   ],
                 ),
               );
-            }).toList(),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildUserTab() {
-    final byUser = _byUser;
-    if (byUser.isEmpty) return _buildEmpty();
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: byUser.length,
-      itemBuilder: (context, index) {
-        final entry = byUser[index];
-        final userId = entry.key;
-        final name = _userNames[userId] ?? '사용자$userId';
-        final total = entry.value.fold(0, (s, e) => s + (e['price'] as int));
-        final count = entry.value.length;
-
-        // 날짜 오름차순 정렬
-        final sorted = [...entry.value]
-          ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
-
-        return Card(
-          margin: const EdgeInsets.only(bottom: 10),
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: ExpansionTile(
-            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            leading: CircleAvatar(
-              backgroundColor: const Color(0xFFFFEDE5),
-              child: Text(
-                name.isNotEmpty ? name[0] : '?',
-                style: const TextStyle(
-                  color: Color(0xFFFF6B35),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            title: Text(
-              name,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text(
-              '$count회 이용',
-              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-            ),
-            trailing: Text(
-              '${formatPrice(total)}원',
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B35),
-              ),
-            ),
-            children: sorted.map((sel) {
-              final dateLabel = _formatDate(sel['date'] as String);
-              final price = sel['price'] as int;
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    const Icon(Icons.calendar_today_outlined,
-                        size: 13, color: Colors.grey),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(dateLabel,
-                          style: const TextStyle(fontSize: 13, color: Colors.black87)),
-                    ),
-                    Text(
-                      '${formatPrice(price)}원',
-                      style: const TextStyle(fontSize: 13, color: Colors.black54),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildEmpty() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[300]),
-          const SizedBox(height: 16),
-          Text(
-            '이용 내역이 없어요',
-            style: TextStyle(fontSize: 15, color: Colors.grey[500]),
-          ),
-        ],
+            }),
+          ],
+        ),
       ),
     );
   }

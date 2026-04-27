@@ -488,6 +488,107 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {});
   }
 
+  void _selectTreasurer(Session session) async {
+    final picked = await showModalBottomSheet<int?>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('총무 선택',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text('오늘의 총무를 선택하세요',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+              const SizedBox(height: 16),
+              ...session.members.map((m) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundColor: m.serverId == session.treasurerId
+                          ? const Color(0xFFFF6B35)
+                          : const Color(0xFFFFEDE5),
+                      child: Text(
+                        m.name.isNotEmpty ? m.name[0] : '?',
+                        style: TextStyle(
+                          color: m.serverId == session.treasurerId
+                              ? Colors.white
+                              : const Color(0xFFFF6B35),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    title: Text(m.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    trailing: m.serverId == session.treasurerId
+                        ? const Icon(Icons.check_circle,
+                            color: Color(0xFFFF6B35), size: 20)
+                        : null,
+                    onTap: () => Navigator.pop(ctx, m.serverId),
+                  )),
+              const Divider(),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: Colors.grey[100],
+                  child: Icon(Icons.cancel_outlined, color: Colors.grey[500]),
+                ),
+                title: Text('지정 안함',
+                    style: TextStyle(color: Colors.grey[600])),
+                onTap: () => Navigator.pop(ctx, -1),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (picked == null || !mounted) return;
+    final newTreasurerId = picked == -1 ? null : picked;
+
+    if (session.restaurants.isNotEmpty) {
+      final restaurant = session.restaurants.first;
+
+      Future<void> setMemo(Member member, String memo) async {
+        if (member.selectionServerId == null || member.serverId == null) return;
+        MenuItem? item;
+        try {
+          item = restaurant.menuItems.firstWhere((m) => m.id == member.selectedMenuItemId);
+        } catch (_) { return; }
+        if (item.serverId == null || restaurant.serverId == null) return;
+        try {
+          await ApiService.updateSelectionMemo(
+            selectionId: member.selectionServerId!,
+            userId: member.serverId!,
+            restaurantId: restaurant.serverId!,
+            menuId: item.serverId!,
+            price: item.price,
+            memo: memo,
+          );
+        } catch (_) {}
+      }
+
+      if (session.treasurerId != null) {
+        final prev = session.members.cast<Member?>().firstWhere(
+            (m) => m?.serverId == session.treasurerId, orElse: () => null);
+        if (prev != null) await setMemo(prev, '');
+      }
+      if (newTreasurerId != null) {
+        final next = session.members.cast<Member?>().firstWhere(
+            (m) => m?.serverId == newTreasurerId, orElse: () => null);
+        if (next != null) await setMemo(next, 'treasurer');
+      }
+    }
+
+    if (mounted) setState(() { session.treasurerId = newTreasurerId; });
+  }
+
   void _joinSession(Session session) async {
     final currentUser = widget.currentUser;
 
@@ -804,6 +905,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onReVoteRestaurant: () => _reVoteRestaurant(session),
                                 onDelete: () => _deleteSession(session),
                                 onCancelVote: () => _cancelVote(session),
+                                onSelectTreasurer: () => _selectTreasurer(session),
                               )),
                               if (_isNonParticipant)
                                 _NonParticipantCard(
@@ -823,7 +925,7 @@ class _HomeScreenState extends State<HomeScreen> {
               heroTag: 'statistics',
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const StatisticsScreen()),
+                MaterialPageRoute(builder: (_) => StatisticsScreen(currentUserId: widget.currentUser.id)),
               ),
               backgroundColor: Colors.white,
               foregroundColor: const Color(0xFF1A1A1A),
@@ -837,9 +939,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: _isNonParticipant
           ? null
-          : Column(
+          : Row(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 FloatingActionButton.extended(
                   heroTag: 'nonParticipant',
@@ -849,7 +950,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: const Text('미참여', style: TextStyle(color: Colors.white, fontSize: 13)),
                 ),
                 if (currentUserSessionId == null) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(width: 12),
                   FloatingActionButton(
                     heroTag: 'createSession',
                     onPressed: _createSession,
@@ -929,6 +1030,7 @@ class _SessionCard extends StatelessWidget {
   final VoidCallback onReVoteRestaurant;
   final VoidCallback onDelete;
   final VoidCallback onCancelVote;
+  final VoidCallback onSelectTreasurer;
 
   const _SessionCard({
     required this.session,
@@ -942,6 +1044,7 @@ class _SessionCard extends StatelessWidget {
     required this.onReVoteRestaurant,
     required this.onDelete,
     required this.onCancelVote,
+    required this.onSelectTreasurer,
   });
 
   @override
@@ -1055,6 +1158,57 @@ class _SessionCard extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: onSelectTreasurer,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: session.treasurerId != null
+                          ? const Color(0xFFFFEDE5)
+                          : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: session.treasurerId != null
+                            ? const Color(0xFFFF6B35)
+                            : Colors.grey[300]!,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.account_balance_wallet_outlined,
+                          size: 15,
+                          color: session.treasurerId != null
+                              ? const Color(0xFFFF6B35)
+                              : Colors.grey[500],
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          session.treasurerId != null
+                              ? '총무: ${session.members.cast<Member?>().firstWhere((m) => m?.serverId == session.treasurerId, orElse: () => null)?.name ?? '미지정'}'
+                              : '총무 지정하기',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: session.treasurerId != null
+                                ? const Color(0xFFFF6B35)
+                                : Colors.grey[500],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.expand_more,
+                          size: 15,
+                          color: session.treasurerId != null
+                              ? const Color(0xFFFF6B35)
+                              : Colors.grey[400],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
               if (canJoin || canReVote) ...[

@@ -227,4 +227,27 @@ class ApiService {
     if (res.statusCode != 201) throw Exception('선택 저장 실패: ${res.body}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
+
+  static Future<void> updateSelectionMemo({
+    required int selectionId,
+    required int userId,
+    required int restaurantId,
+    required int menuId,
+    required int price,
+    required String memo,
+  }) async {
+    final res = await http.put(
+      Uri.parse('$_base/lunch-selections/$selectionId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'date': todayString,
+        'restaurant_id': restaurantId,
+        'menu_id': menuId,
+        'price': price,
+        'memo': memo,
+      }),
+    );
+    if (res.statusCode != 200) throw Exception('총무 저장 실패: ${res.body}');
+  }
 }

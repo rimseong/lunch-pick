@@ -12,6 +12,7 @@ class Session {
   SessionStatus status;
   String? selectedRestaurantId;
   final int? creatorId;
+  int? treasurerId;
 
   Session({
     required this.id,
@@ -22,6 +23,7 @@ class Session {
     this.status = SessionStatus.setup,
     this.selectedRestaurantId,
     this.creatorId,
+    this.treasurerId,
   });
 
   Restaurant? get selectedRestaurant {
