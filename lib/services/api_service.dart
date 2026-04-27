@@ -154,6 +154,31 @@ class ApiService {
     return (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
   }
 
+  static Future<List<Map<String, dynamic>>> listSelectionsByDate(String date) async {
+    final res = await http.get(
+      Uri.parse('$_base/lunch-selections?selection_date=$date'),
+    );
+    if (res.statusCode != 200) throw Exception('선택 조회 실패: ${res.body}');
+    return (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<List<Map<String, dynamic>>> listSelectionsByMonth(int year, int month) async {
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+    final futures = List.generate(daysInMonth, (i) {
+      final day = (i + 1).toString().padLeft(2, '0');
+      final m = month.toString().padLeft(2, '0');
+      return listSelectionsByDate('$year-$m-$day');
+    });
+    final results = await Future.wait(futures);
+    return results.expand((list) => list).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> listAllUsers() async {
+    final res = await http.get(Uri.parse('$_base/users'));
+    if (res.statusCode != 200) throw Exception('사용자 조회 실패: ${res.body}');
+    return (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
+  }
+
   static Future<Map<String, dynamic>> createSelection({
     required int userId,
     required int restaurantId,

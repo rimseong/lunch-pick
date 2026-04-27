@@ -11,6 +11,7 @@ import 'add_restaurant_screen.dart';
 import 'create_session_screen.dart';
 import 'menu_selection_screen.dart';
 import 'result_screen.dart';
+import 'statistics_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser currentUser;
@@ -225,9 +226,33 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
-    if (confirmed == true && mounted) {
-      setState(() => _isNonParticipant = true);
+    if (confirmed != true || !mounted) return;
+
+    final currentUser = widget.currentUser;
+    final mySession = _sessions.cast<Session?>().firstWhere(
+      (s) => s!.members.any((m) => m.serverId == currentUser.id),
+      orElse: () => null,
+    );
+
+    if (mySession != null) {
+      final member = mySession.members.cast<Member?>().firstWhere(
+        (m) => m?.serverId == currentUser.id,
+        orElse: () => null,
+      );
+      if (member?.selectionServerId != null) {
+        try {
+          await ApiService.deleteSelection(member!.selectionServerId!);
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() {
+          mySession.members.removeWhere((m) => m.serverId == currentUser.id);
+          if (mySession.members.isEmpty) _sessions.remove(mySession);
+        });
+      }
     }
+
+    if (mounted) setState(() => _isNonParticipant = true);
   }
 
   void _cancelNonParticipant() {
@@ -729,18 +754,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          _buildSummaryBar(),
-          if (_sessions.isNotEmpty) ...[
-            _buildVoteChart(sortedSessions),
-            const Divider(height: 1, thickness: 1),
-          ],
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B35)))
-                : RefreshIndicator(
-                    color: const Color(0xFFFF6B35),
+          Column(
+            children: [
+              _buildSummaryBar(),
+              if (_sessions.isNotEmpty) ...[
+                _buildVoteChart(sortedSessions),
+                const Divider(height: 1, thickness: 1),
+              ],
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B35)))
+                    : RefreshIndicator(
+                        color: const Color(0xFFFF6B35),
                     onRefresh: _refresh,
                     child: ListView(
                             padding: const EdgeInsets.all(16),
@@ -786,6 +813,25 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                   ),
+          ),
+            ],
+          ),
+          Positioned(
+            left: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'statistics',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const StatisticsScreen()),
+              ),
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF1A1A1A),
+              elevation: 2,
+              icon: const Icon(Icons.bar_chart_outlined, size: 20),
+              label: const Text('이용 내역',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            ),
           ),
         ],
       ),
