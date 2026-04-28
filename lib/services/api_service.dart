@@ -173,6 +173,20 @@ class ApiService {
     return results.expand((list) => list).toList();
   }
 
+  static Future<Map<String, dynamic>> getMonthlyStats(int year, int month) async {
+    final ym = '$year-${month.toString().padLeft(2, '0')}';
+    final res = await http.get(Uri.parse('$_base/stats/monthly?year_month=$ym'));
+    if (res.statusCode != 200) throw Exception('월별 통계 조회 실패: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> getUserMonthlyStats(int userId, int year, int month) async {
+    final ym = '$year-${month.toString().padLeft(2, '0')}';
+    final res = await http.get(Uri.parse('$_base/stats/monthly/users/$userId?year_month=$ym'));
+    if (res.statusCode != 200) throw Exception('사용자 월별 통계 조회 실패: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   static Future<List<Map<String, dynamic>>> listAllUsers() async {
     final res = await http.get(Uri.parse('$_base/users'));
     if (res.statusCode != 200) throw Exception('사용자 조회 실패: ${res.body}');

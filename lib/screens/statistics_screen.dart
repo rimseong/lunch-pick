@@ -15,9 +15,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   bool _isLoading = false;
   String? _selectedDate;
 
-  List<Map<String, dynamic>> _selections = [];
-  Map<int, String> _userNames = {};
-  Map<int, String> _restaurantNames = {};
+  List<Map<String, dynamic>> _days = [];
 
   static const _weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -30,24 +28,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   Future<void> _loadData() async {
     if (mounted) setState(() { _isLoading = true; _selectedDate = null; });
     try {
-      final results = await Future.wait([
-        ApiService.listSelectionsByMonth(_year, _month),
-        ApiService.listAllUsers(),
-        ApiService.listRestaurants(),
-      ]);
-
-      final Map<int, String> names = {
-        for (final u in results[1]) u['id'] as int: u['name'] as String,
-      };
-      final Map<int, String> restaurantNames = {
-        for (final r in results[2]) r['id'] as int: r['name'] as String,
-      };
-
+      final stats = await ApiService.getMonthlyStats(_year, _month);
       if (mounted) {
         setState(() {
-          _selections = results[0];
-          _userNames = names;
-          _restaurantNames = restaurantNames;
+          _days = (stats['days'] as List).cast<Map<String, dynamic>>();
           _isLoading = false;
         });
       }
@@ -77,12 +61,8 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     return _year == now.year && _month == now.month;
   }
 
-  Map<String, List<Map<String, dynamic>>> get _byDateMap {
-    final Map<String, List<Map<String, dynamic>>> map = {};
-    for (final sel in _selections) {
-      map.putIfAbsent(sel['date'] as String, () => []).add(sel);
-    }
-    return map;
+  Map<String, Map<String, dynamic>> get _byDateMap {
+    return { for (final day in _days) day['date'] as String: day };
   }
 
   String _dateKey(int day) {
@@ -218,7 +198,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
 
                   final dateKey = _dateKey(day);
                   final dayData = byDate[dateKey];
-                  final hasData = dayData != null && dayData.isNotEmpty;
+                  final hasData = dayData != null;
                   final isSelected = _selectedDate == dateKey;
                   final isToday = isThisMonth && today.day == day;
                   final isSun = col == 6;
@@ -272,7 +252,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                             if (hasData) ...[
                               const SizedBox(height: 3),
                               Text(
-                                formatPrice(dayData.fold(0, (s, e) => s + (e['price'] as int))),
+                                formatPrice(dayData['total_amount'] as int),
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: isSelected
@@ -282,7 +262,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                 ),
                               ),
                               Text(
-                                '${dayData.length}명',
+                                '${(dayData['users'] as List).length}명',
                                 style: TextStyle(fontSize: 9, color: Colors.grey[400]),
                               ),
                             ],
@@ -301,12 +281,14 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   }
 
   Widget _buildDayDetail(String dateKey) {
-    final dayData = _byDateMap[dateKey] ?? [];
+    final dayData = _byDateMap[dateKey];
+    if (dayData == null) return const SizedBox.shrink();
     final label = _formatDateLabel(dateKey);
+    final users = (dayData['users'] as List).cast<Map<String, dynamic>>();
 
-    final Map<int, List<Map<String, dynamic>>> byRestaurant = {};
-    for (final sel in dayData) {
-      byRestaurant.putIfAbsent(sel['restaurant_id'] as int, () => []).add(sel);
+    final Map<String, List<Map<String, dynamic>>> byRestaurant = {};
+    for (final user in users) {
+      byRestaurant.putIfAbsent(user['restaurant_name'] as String, () => []).add(user);
     }
 
     return Card(
@@ -321,16 +303,8 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             ...byRestaurant.entries.map((entry) {
-              final restaurantName = _restaurantNames[entry.key] ?? '식당${entry.key}';
+              final restaurantName = entry.key;
               final members = entry.value;
-
-              final treasurerSel = members.cast<Map<String, dynamic>?>().firstWhere(
-                (m) => (m?['memo'] as String?) == 'treasurer',
-                orElse: () => null,
-              );
-              final treasurerName = treasurerSel != null
-                  ? (_userNames[treasurerSel['user_id'] as int] ?? '?')
-                  : null;
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -351,24 +325,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                             ),
                           ),
                         ),
-                        if (treasurerName != null) ...[
-                          const Icon(Icons.account_balance_wallet_outlined, size: 13, color: Color(0xFFFF6B35)),
-                          const SizedBox(width: 3),
-                          Text(
-                            '총무: $treasurerName',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFFFF6B35),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                     const SizedBox(height: 6),
-                    ...members.map((sel) {
-                      final name = _userNames[sel['user_id'] as int] ?? '사용자${sel['user_id']}';
-                      final price = sel['price'] as int;
+                    ...members.map((user) {
+                      final name = user['user_name'] as String;
+                      final menuName = user['menu_name'] as String;
+                      final amount = user['amount'] as int;
                       return Padding(
                         padding: const EdgeInsets.only(left: 20, bottom: 4),
                         child: Row(
@@ -376,10 +339,17 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                             const Icon(Icons.person_outline, size: 13, color: Colors.grey),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: Text(name,
-                                  style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(name,
+                                      style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                                  Text(menuName,
+                                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                                ],
+                              ),
                             ),
-                            Text('${formatPrice(price)}원',
+                            Text('${formatPrice(amount)}원',
                                 style: const TextStyle(fontSize: 13, color: Colors.black54)),
                           ],
                         ),
