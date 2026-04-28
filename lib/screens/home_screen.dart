@@ -925,7 +925,7 @@ class _HomeScreenState extends State<HomeScreen> {
               heroTag: 'statistics',
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => StatisticsScreen(currentUserId: widget.currentUser.id)),
+                MaterialPageRoute(builder: (_) => const StatisticsScreen()),
               ),
               backgroundColor: Colors.white,
               foregroundColor: const Color(0xFF1A1A1A),

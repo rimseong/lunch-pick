@@ -20,7 +20,6 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   Map<int, String> _restaurantNames = {};
 
   static const _weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
-  static const _weekdaysFull = ['월', '화', '수', '목', '금', '토', '일'];
 
   @override
   void initState() {
@@ -96,7 +95,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final parts = dateStr.split('-');
     if (parts.length != 3) return dateStr;
     final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
-    return '${parts[1]}/${parts[2]} (${_weekdaysFull[dt.weekday - 1]})';
+    return '${parts[1]}/${parts[2]} (${_weekdayLabels[dt.weekday - 1]})';
   }
 
   @override
